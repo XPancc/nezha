@@ -81,28 +81,45 @@ def sync_to_gitee(tag: str, body: str, files: list):
         "prerelease": False,
         "target_commitish": "master",
     }
-    release_api_response = None
-    for attempt in range(max_retries):
-        try:
-            release_api_response = api_client.post(
-                release_api_uri, json=release_data, timeout=30
-            )
-            release_api_response.raise_for_status()
-            break
-        except requests.exceptions.Timeout as errt:
-            print(f"Request timed out: {errt} Retrying in 60 seconds...")
-            time.sleep(60)
-        except requests.exceptions.RequestException as err:
-            print(f"Request failed: {err}")
-            break
+    # Check if release already exists for this tag
+    release_id = None
+    try:
+        list_response = api_client.get(
+            release_api_uri, params={"access_token": access_token}, timeout=30
+        )
+        if list_response.status_code == 200:
+            for rel in list_response.json():
+                if rel.get("tag_name") == tag:
+                    release_id = rel.get("id")
+                    print(f"Found existing Gitee release for {tag}, id: {release_id}")
+                    break
+    except requests.exceptions.RequestException as err:
+        print(f"Failed to check existing releases: {err}")
 
-    if release_api_response is None or release_api_response.status_code != 201:
-        print("Failed to create Gitee release")
-        api_client.close()
-        return
+    # Create new release if not found
+    if release_id is None:
+        release_api_response = None
+        for attempt in range(max_retries):
+            try:
+                release_api_response = api_client.post(
+                    release_api_uri, json=release_data, timeout=30
+                )
+                release_api_response.raise_for_status()
+                break
+            except requests.exceptions.Timeout as errt:
+                print(f"Request timed out: {errt} Retrying in 60 seconds...")
+                time.sleep(60)
+            except requests.exceptions.RequestException as err:
+                print(f"Request failed: {err}")
+                break
 
-    release_info = release_api_response.json()
-    release_id = release_info.get("id")
+        if release_api_response is None or release_api_response.status_code != 201:
+            print("Failed to create Gitee release")
+            api_client.close()
+            return
+
+        release_info = release_api_response.json()
+        release_id = release_info.get("id")
 
     print(f"Gitee release id: {release_id}")
     asset_api_uri = f"{release_api_uri}/{release_id}/attach_files"
